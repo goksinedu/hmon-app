@@ -13,7 +13,7 @@ import { Experiment } from '../lib/types';
 
 const STORAGE_KEY = 'hmon.activeExperiment';
 /** Bump to force-reseeding the 2-week demo dataset for existing visitors. */
-const SAMPLE_SEED_KEY = 'hmon.sampleSeeded.v4';
+const SAMPLE_SEED_KEY = 'hmon.sampleSeeded.v5';
 
 interface ExperimentContextValue {
   experiment: Experiment | null;

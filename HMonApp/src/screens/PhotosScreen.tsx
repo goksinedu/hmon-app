@@ -16,6 +16,10 @@ import { Card, ChipRow, SectionTitle } from '../components/UI';
 import { useExperiment } from '../context/ExperimentContext';
 import { firebaseReady } from '../lib/firebase';
 import { photosForWeek, uploadPhoto } from '../lib/repo';
+import {
+  isSamplePhotoKey,
+  resolveSamplePhotoUrl,
+} from '../lib/sampleData';
 import { mondaySessions, toISODate } from '../lib/schedule';
 import { PLANT_IDS, PhotoRecord, PlantId } from '../lib/types';
 import { colors, radius, spacing } from '../theme';
@@ -39,13 +43,13 @@ export default function PhotosScreen() {
   const { experiment } = useExperiment();
   const [session, setSession] = useState<{ date: string; week: number } | null>(null);
   const [photos, setPhotos] = useState<PhotoRecord[]>([]);
+  const [resolvedUrls, setResolvedUrls] = useState<Record<string, string>>({});
   const [uploadingKey, setUploadingKey] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
 
   useEffect(() => {
     if (!experiment) return;
     const sessions = mondaySessions(experiment.startDate);
-    // Prefer the latest week that already has photos (sample data covers weeks 1–2).
     const iso = toISODate(new Date());
     const pastOrToday = [...sessions].reverse().find((s) => s.date <= iso) ?? sessions[0];
     setSession(pastOrToday);
@@ -54,7 +58,21 @@ export default function PhotosScreen() {
   const refresh = useCallback(async () => {
     if (!experiment || !session) return;
     try {
-      setPhotos(await photosForWeek(experiment.id, session.week));
+      const list = await photosForWeek(experiment.id, session.week);
+      setPhotos(list);
+
+      const urlMap: Record<string, string> = {};
+      await Promise.all(
+        list.map(async (p) => {
+          const key = p.id ?? `${p.week}-${p.kind}-${p.plantId ?? 'overview'}`;
+          if (isSamplePhotoKey(p.downloadUrl)) {
+            urlMap[key] = await resolveSamplePhotoUrl(p.downloadUrl);
+          } else {
+            urlMap[key] = p.downloadUrl;
+          }
+        }),
+      );
+      setResolvedUrls(urlMap);
     } catch {
       // ignore; grid just shows empty slots
     }
@@ -70,7 +88,7 @@ export default function PhotosScreen() {
     refresh();
   }, [refresh]);
 
-  // Once photos load, if the default week is empty jump back to the last week that has any.
+  // If the current week has no photos, jump to the latest earlier week that does.
   useEffect(() => {
     if (!experiment || !session || photos.length > 0) return;
     let cancelled = false;
@@ -105,6 +123,11 @@ export default function PhotosScreen() {
     photos.find((p) =>
       slot.kind === 'overview' ? p.kind === 'overview' : p.plantId === slot.plantId,
     );
+
+  const uriForPhoto = (photo: PhotoRecord): string | undefined => {
+    const key = photo.id ?? `${photo.week}-${photo.kind}-${photo.plantId ?? 'overview'}`;
+    return resolvedUrls[key] || (isSamplePhotoKey(photo.downloadUrl) ? undefined : photo.downloadUrl);
+  };
 
   const pickAndUpload = async (slot: Slot, fromCamera: boolean) => {
     if (!session) return;
@@ -149,7 +172,6 @@ export default function PhotosScreen() {
 
   const onSlotPress = (slot: Slot) => {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      // Web Alert.alert button callbacks are unreliable; go straight to the library picker.
       pickAndUpload(slot, false);
       return;
     }
@@ -189,6 +211,7 @@ export default function PhotosScreen() {
         {SLOTS.map((slot) => {
           const photo = photoForSlot(slot);
           const uploading = uploadingKey === slot.key;
+          const uri = photo ? uriForPhoto(photo) : undefined;
           return (
             <TouchableOpacity
               key={slot.key}
@@ -196,10 +219,10 @@ export default function PhotosScreen() {
               onPress={() => onSlotPress(slot)}
               disabled={uploading}
             >
-              {photo ? (
-                <Image source={{ uri: photo.downloadUrl }} style={styles.slotImage} />
+              {uri ? (
+                <Image source={{ uri }} style={styles.slotImage} />
               ) : (
-                <Text style={styles.slotPlus}>{uploading ? '…' : '+'}</Text>
+                <Text style={styles.slotPlus}>{uploading ? '…' : photo ? '…' : '+'}</Text>
               )}
               <Text style={[styles.slotLabel, photo && styles.slotLabelDone]}>
                 {slot.label}

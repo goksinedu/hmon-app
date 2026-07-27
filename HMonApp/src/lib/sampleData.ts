@@ -37,11 +37,30 @@ const SAMPLE_IMAGE_MODULES = {
   w2Plant: require('../../assets/sample/w2-plant.jpg'),
 } as const;
 
-async function resolveAssetUri(module: number): Promise<string> {
-  const asset = Asset.fromModule(module);
-  if (!asset.localUri && !asset.uri) {
-    await asset.downloadAsync();
-  } else if (!asset.downloaded) {
+/** Marker stored in downloadUrl so the UI can resolve the current bundle asset. */
+export function samplePhotoKey(week: number, kind: 'overview' | 'plant'): string {
+  return `sample:w${week}:${kind}`;
+}
+
+export function isSamplePhotoKey(url: string | null | undefined): boolean {
+  return !!url && url.startsWith('sample:w');
+}
+
+export async function resolveSamplePhotoUrl(key: string): Promise<string> {
+  const match = /^sample:w([12]):(overview|plant)$/.exec(key);
+  if (!match) return '';
+  const week = Number(match[1]);
+  const kind = match[2] as 'overview' | 'plant';
+  const mod =
+    week === 1
+      ? kind === 'overview'
+        ? SAMPLE_IMAGE_MODULES.w1Overview
+        : SAMPLE_IMAGE_MODULES.w1Plant
+      : kind === 'overview'
+        ? SAMPLE_IMAGE_MODULES.w2Overview
+        : SAMPLE_IMAGE_MODULES.w2Plant;
+  const asset = Asset.fromModule(mod);
+  if (!asset.downloaded) {
     await asset.downloadAsync().catch(() => undefined);
   }
   return asset.localUri ?? asset.uri ?? '';
@@ -91,7 +110,7 @@ function buildSensorReadings(startDate: string, rand: () => number): SensorReadi
     const hourOfDay = new Date(t).getHours();
     const diurnal = Math.sin(((hourOfDay - 6) / 24) * 2 * Math.PI);
     const ec = 1.2 + 0.55 * dayFrac + (rand() - 0.5) * 0.08;
-    const reading: SensorReading = {
+    readings.push({
       timestamp: t,
       ph: round2(6.2 - 0.25 * dayFrac + (rand() - 0.5) * 0.12),
       ec: round2(ec),
@@ -101,8 +120,7 @@ function buildSensorReadings(startDate: string, rand: () => number): SensorReadi
       ambientHumidityPct: Math.round(58 - 6 * diurnal + (rand() - 0.5) * 4),
       waterLevelOk: !((t - start) % (7 * DAY_MS) > 6.2 * DAY_MS),
       source: 'iot',
-    };
-    readings.push(reading);
+    });
   }
   return readings;
 }
@@ -163,26 +181,15 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-async function samplePhotoUri(week: number, kind: 'overview' | 'plant'): Promise<string> {
-  if (week === 1) {
-    return resolveAssetUri(
-      kind === 'overview' ? SAMPLE_IMAGE_MODULES.w1Overview : SAMPLE_IMAGE_MODULES.w1Plant,
-    );
-  }
-  return resolveAssetUri(
-    kind === 'overview' ? SAMPLE_IMAGE_MODULES.w2Overview : SAMPLE_IMAGE_MODULES.w2Plant,
-  );
-}
-
-async function buildPhotos(experimentId: string, startDate: string): Promise<PhotoRecord[]> {
+function buildPhotos(experimentId: string, startDate: string): PhotoRecord[] {
   const mondays = measurementDays(startDate).filter(
     (d) => d.weekday === 'Monday' && d.week <= 2,
   );
   const photos: PhotoRecord[] = [];
   for (const m of mondays) {
-    const slots: Array<{ kind: 'overview' | 'plant'; plantId: PlantId | null; label: string }> = [
-      { kind: 'overview', plantId: null, label: 'Overview' },
-      ...PLANT_IDS.map((p) => ({ kind: 'plant' as const, plantId: p, label: p })),
+    const slots: Array<{ kind: 'overview' | 'plant'; plantId: PlantId | null }> = [
+      { kind: 'overview', plantId: null },
+      ...PLANT_IDS.map((p) => ({ kind: 'plant' as const, plantId: p })),
     ];
     for (const slot of slots) {
       const fileLabel = slot.kind === 'overview' ? 'overview' : slot.plantId!;
@@ -192,7 +199,8 @@ async function buildPhotos(experimentId: string, startDate: string): Promise<Pho
         kind: slot.kind,
         plantId: slot.plantId,
         storagePath: `experiments/${experimentId}/week-${m.week}/${m.date}_${fileLabel}.jpg`,
-        downloadUrl: await samplePhotoUri(m.week, slot.kind),
+        // Stable key — resolved to a real asset URL when the Photos screen renders.
+        downloadUrl: samplePhotoKey(m.week, slot.kind),
         largestLeafAreaCm2:
           slot.kind === 'plant'
             ? round1(8 + m.week * 4 + (slot.plantId!.charCodeAt(1) % 5))
@@ -211,10 +219,16 @@ async function buildPhotos(experimentId: string, startDate: string): Promise<Pho
 export async function loadSampleData(): Promise<Experiment> {
   const rand = mulberry32(20260713);
   const experiment = buildSampleExperiment();
+  // Warm asset cache so the Photos tab can resolve URLs quickly.
+  await Promise.all(
+    Object.values(SAMPLE_IMAGE_MODULES).map((mod) =>
+      Asset.fromModule(mod).downloadAsync().catch(() => undefined),
+    ),
+  );
   await saveExperiment(experiment);
   await setSensorReadings(experiment.id, buildSensorReadings(experiment.startDate, rand));
   await setPhenotypeRecords(experiment.id, buildPhenotypeRecords(experiment.startDate, rand));
   await setLightingLogs(experiment.id, buildLightingLogs(experiment.startDate, rand));
-  await setPhotos(experiment.id, await buildPhotos(experiment.id, experiment.startDate));
+  await setPhotos(experiment.id, buildPhotos(experiment.id, experiment.startDate));
   return experiment;
 }

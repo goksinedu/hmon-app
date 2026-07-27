@@ -1,0 +1,44 @@
+{
+  "expo": {
+    "name": "HMon - Hydroponics Monitor",
+    "slug": "hmon-hydroponics-monitor",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/hai-logo.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/hai-logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "edu.bau.hmon",
+      "infoPlist": {
+        "NSCameraUsageDescription": "HMon uses the camera to take standardized weekly photos of the hydroponic system and individual plants.",
+        "NSPhotoLibraryUsageDescription": "HMon accesses your photo library so you can upload plant photos for AI-based leaf area analysis."
+      }
+    },
+    "android": {
+      "package": "edu.bau.hmon",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/hai-logo.png",
+        "backgroundColor": "#ffffff"
+      },
+      "permissions": ["CAMERA", "READ_MEDIA_IMAGES"]
+    },
+    "web": {
+      "favicon": "./assets/hai-logo.png"
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "HMon accesses your photos so you can upload weekly plant images.",
+          "cameraPermission": "HMon uses the camera to take standardized weekly plant photos."
+        }
+      ]
+    ]
+  }
+}

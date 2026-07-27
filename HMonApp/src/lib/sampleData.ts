@@ -2,9 +2,11 @@
  * Generates a realistic 2-week sample dataset for demo and training purposes:
  * an experiment that started two Mondays ago, IoT sensor readings every
  * 3 hours, P1-P10 phenotyping for the first 6 measurement points
- * (Mon/Wed/Fri x 2 weeks), the two weekly lighting logs, and placeholder
- * photos for both Monday sessions (1 overview + 10 plants each).
+ * (Mon/Wed/Fri x 2 weeks), the two weekly lighting logs, and sample
+ * photographs for both Monday sessions (1 overview + 10 plants each).
  */
+import { Image } from 'react-native';
+
 import {
   saveExperiment,
   setLightingLogs,
@@ -27,6 +29,18 @@ export const SAMPLE_EXPERIMENT_ID = 'demo-sample-2weeks';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
+
+const SAMPLE_IMAGE_MODULES = {
+  w1Overview: require('../../assets/sample/w1-overview.jpg'),
+  w1Plant: require('../../assets/sample/w1-plant.jpg'),
+  w2Overview: require('../../assets/sample/w2-overview.jpg'),
+  w2Plant: require('../../assets/sample/w2-plant.jpg'),
+} as const;
+
+function resolveAssetUri(module: number): string {
+  const resolved = Image.resolveAssetSource(module);
+  return resolved?.uri ?? '';
+}
 
 /** Deterministic pseudo-random generator so the demo data is reproducible. */
 function mulberry32(seed: number): () => number {
@@ -70,9 +84,7 @@ function buildSensorReadings(startDate: string, rand: () => number): SensorReadi
   for (let t = start + 6 * HOUR_MS; t <= end; t += 3 * HOUR_MS) {
     const dayFrac = (t - start) / (14 * DAY_MS);
     const hourOfDay = new Date(t).getHours();
-    // Diurnal swing: warmer and drier mid-day.
     const diurnal = Math.sin(((hourOfDay - 6) / 24) * 2 * Math.PI);
-    // EC drifts up as nutrients are added, pH drifts slightly down.
     const ec = 1.2 + 0.55 * dayFrac + (rand() - 0.5) * 0.08;
     const reading: SensorReading = {
       timestamp: t,
@@ -82,7 +94,6 @@ function buildSensorReadings(startDate: string, rand: () => number): SensorReadi
       waterTempC: round1(20 + 1.2 * diurnal + (rand() - 0.5) * 0.5),
       ambientTempC: round1(23.5 + 2.5 * diurnal + (rand() - 0.5) * 0.8),
       ambientHumidityPct: Math.round(58 - 6 * diurnal + (rand() - 0.5) * 4),
-      // Water level drops low near the end of each week, before the refill.
       waterLevelOk: !((t - start) % (7 * DAY_MS) > 6.2 * DAY_MS),
       source: 'iot',
     };
@@ -96,9 +107,8 @@ function buildPhenotypeRecords(startDate: string, rand: () => number): Phenotype
   const days = measurementDays(startDate).filter((d) => d.week <= 2);
   for (const day of days) {
     for (const plantId of PLANT_IDS) {
-      // Each plant gets a stable "vigour" factor so growth curves differ.
-      const vigour = 0.85 + 0.3 * ((plantId.charCodeAt(1) * 7 + plantId.length) % 10) / 10;
-      const growth = day.measurementPoint; // 1..6
+      const vigour = 0.85 + (0.3 * ((plantId.charCodeAt(1) * 7 + plantId.length) % 10)) / 10;
+      const growth = day.measurementPoint;
       records.push({
         date: day.date,
         week: day.week,
@@ -148,16 +158,15 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-/** Tiny green SVG leaf tile used as a stand-in photo for the demo dataset. */
-function placeholderPhotoUrl(label: string, week: number): string {
-  const bg = week === 1 ? '#3aaa35' : '#2b8a3e';
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320">
-    <rect width="320" height="320" fill="${bg}"/>
-    <circle cx="160" cy="160" r="70" fill="#ffffff" opacity="0.2"/>
-    <text x="160" y="155" text-anchor="middle" fill="#ffffff" font-family="sans-serif" font-size="28" font-weight="700">${label}</text>
-    <text x="160" y="190" text-anchor="middle" fill="#e6f4e6" font-family="sans-serif" font-size="16">Week ${week}</text>
-  </svg>`;
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+function samplePhotoUri(week: number, kind: 'overview' | 'plant'): string {
+  if (week === 1) {
+    return resolveAssetUri(
+      kind === 'overview' ? SAMPLE_IMAGE_MODULES.w1Overview : SAMPLE_IMAGE_MODULES.w1Plant,
+    );
+  }
+  return resolveAssetUri(
+    kind === 'overview' ? SAMPLE_IMAGE_MODULES.w2Overview : SAMPLE_IMAGE_MODULES.w2Plant,
+  );
 }
 
 function buildPhotos(experimentId: string, startDate: string): PhotoRecord[] {
@@ -178,8 +187,11 @@ function buildPhotos(experimentId: string, startDate: string): PhotoRecord[] {
         kind: slot.kind,
         plantId: slot.plantId,
         storagePath: `experiments/${experimentId}/week-${m.week}/${m.date}_${fileLabel}.jpg`,
-        downloadUrl: placeholderPhotoUrl(slot.label, m.week),
-        largestLeafAreaCm2: slot.kind === 'plant' ? round1(8 + m.week * 4 + (slot.plantId!.charCodeAt(1) % 5)) : null,
+        downloadUrl: samplePhotoUri(m.week, slot.kind),
+        largestLeafAreaCm2:
+          slot.kind === 'plant'
+            ? round1(8 + m.week * 4 + (slot.plantId!.charCodeAt(1) % 5))
+            : null,
         createdAt: parseISODate(m.date).getTime() + 11 * HOUR_MS,
       });
     }

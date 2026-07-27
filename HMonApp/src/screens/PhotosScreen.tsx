@@ -1,8 +1,10 @@
 import * as ImagePicker from 'expo-image-picker';
+import { useFocusEffect } from '@react-navigation/native';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   Image,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -25,21 +27,32 @@ const SLOTS: Slot[] = [
   ...PLANT_IDS.map<Slot>((p) => ({ key: p, kind: 'plant', plantId: p, label: p })),
 ];
 
+function showMessage(title: string, message: string) {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    window.alert(`${title}\n\n${message}`);
+    return;
+  }
+  Alert.alert(title, message);
+}
+
 export default function PhotosScreen() {
   const { experiment } = useExperiment();
   const [session, setSession] = useState<{ date: string; week: number } | null>(null);
   const [photos, setPhotos] = useState<PhotoRecord[]>([]);
   const [uploadingKey, setUploadingKey] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
 
   useEffect(() => {
     if (!experiment) return;
     const sessions = mondaySessions(experiment.startDate);
+    // Prefer the latest week that already has photos (sample data covers weeks 1–2).
     const iso = toISODate(new Date());
-    setSession([...sessions].reverse().find((s) => s.date <= iso) ?? sessions[0]);
+    const pastOrToday = [...sessions].reverse().find((s) => s.date <= iso) ?? sessions[0];
+    setSession(pastOrToday);
   }, [experiment?.id]);
 
   const refresh = useCallback(async () => {
-    if (!experiment || !session || !firebaseReady()) return;
+    if (!experiment || !session) return;
     try {
       setPhotos(await photosForWeek(experiment.id, session.week));
     } catch {
@@ -47,9 +60,36 @@ export default function PhotosScreen() {
     }
   }, [experiment?.id, session?.week]);
 
+  useFocusEffect(
+    useCallback(() => {
+      refresh();
+    }, [refresh]),
+  );
+
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // Once photos load, if the default week is empty jump back to the last week that has any.
+  useEffect(() => {
+    if (!experiment || !session || photos.length > 0) return;
+    let cancelled = false;
+    (async () => {
+      const sessions = mondaySessions(experiment.startDate);
+      for (const s of [...sessions].reverse()) {
+        if (s.week >= session.week) continue;
+        const list = await photosForWeek(experiment.id, s.week);
+        if (cancelled) return;
+        if (list.length > 0) {
+          setSession(s);
+          return;
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [experiment?.id, session?.week, photos.length]);
 
   if (!experiment) {
     return (
@@ -68,10 +108,6 @@ export default function PhotosScreen() {
 
   const pickAndUpload = async (slot: Slot, fromCamera: boolean) => {
     if (!session) return;
-    if (!firebaseReady()) {
-      Alert.alert('Cloud not configured', 'Configure Firebase (see README) before uploading photos.');
-      return;
-    }
     const options: ImagePicker.ImagePickerOptions = {
       mediaTypes: ['images'],
       quality: 0.85,
@@ -81,7 +117,7 @@ export default function PhotosScreen() {
       ? await (async () => {
           const perm = await ImagePicker.requestCameraPermissionsAsync();
           if (!perm.granted) {
-            Alert.alert('Permission needed', 'Camera access is required to take photos.');
+            showMessage('Permission needed', 'Camera access is required to take photos.');
             return null;
           }
           return ImagePicker.launchCameraAsync(options);
@@ -90,6 +126,7 @@ export default function PhotosScreen() {
     if (!result || result.canceled || !result.assets?.length) return;
 
     setUploadingKey(slot.key);
+    setStatus(null);
     try {
       await uploadPhoto(experiment.id, result.assets[0].uri, {
         date: session.date,
@@ -98,17 +135,27 @@ export default function PhotosScreen() {
         plantId: slot.plantId,
       });
       await refresh();
+      setStatus(
+        firebaseReady()
+          ? `${slot.label} uploaded to cloud storage.`
+          : `${slot.label} saved on this device.`,
+      );
     } catch (e) {
-      Alert.alert('Upload failed', e instanceof Error ? e.message : String(e));
+      setStatus(`Upload failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setUploadingKey(null);
     }
   };
 
   const onSlotPress = (slot: Slot) => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      // Web Alert.alert button callbacks are unreliable; go straight to the library picker.
+      pickAndUpload(slot, false);
+      return;
+    }
     Alert.alert(
       `${slot.label} photo`,
-      'Choose the image source. Photos are stored in the cloud under a structured path for AI leaf-area analysis.',
+      'Choose the image source. Photos are tagged for AI leaf-area analysis.',
       [
         { text: 'Camera', onPress: () => pickAndUpload(slot, true) },
         { text: 'Photo library', onPress: () => pickAndUpload(slot, false) },
@@ -131,9 +178,11 @@ export default function PhotosScreen() {
         />
         <Text style={styles.hint}>
           {session ? `Session date: ${session.date} — ` : ''}
-          {uploadedCount}/11 photos uploaded (1 overview + 10 plants). Images are tagged and
-          stored for the BAU leaf-area application and future AI analysis.
+          {uploadedCount}/11 photos uploaded (1 overview + 10 plants). Sample pictures are
+          available for weeks 1–2. Images are tagged for the BAU leaf-area application and
+          future AI analysis.
         </Text>
+        {status ? <Text style={styles.status}>{status}</Text> : null}
       </Card>
 
       <View style={styles.grid}>
@@ -190,6 +239,12 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginTop: spacing.md,
     lineHeight: 18,
+  },
+  status: {
+    marginTop: spacing.sm,
+    fontSize: 13,
+    color: colors.primaryDark,
+    fontWeight: '600',
   },
   grid: {
     flexDirection: 'row',

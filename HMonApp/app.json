@@ -26,7 +26,10 @@
         "foregroundImage": "./assets/hai-logo.png",
         "backgroundColor": "#ffffff"
       },
-      "permissions": ["CAMERA", "READ_MEDIA_IMAGES"]
+      "permissions": [
+        "CAMERA",
+        "READ_MEDIA_IMAGES"
+      ]
     },
     "web": {
       "favicon": "./assets/hai-logo.png"
@@ -41,7 +44,8 @@
           "photosPermission": "HMon accesses your photos so you can upload weekly plant images.",
           "cameraPermission": "HMon uses the camera to take standardized weekly plant photos."
         }
-      ]
+      ],
+      "expo-asset"
     ]
   }
 }

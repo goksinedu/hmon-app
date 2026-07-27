@@ -5,7 +5,7 @@
  * (Mon/Wed/Fri x 2 weeks), the two weekly lighting logs, and sample
  * photographs for both Monday sessions (1 overview + 10 plants each).
  */
-import { Image } from 'react-native';
+import { Asset } from 'expo-asset';
 
 import {
   saveExperiment,
@@ -37,9 +37,14 @@ const SAMPLE_IMAGE_MODULES = {
   w2Plant: require('../../assets/sample/w2-plant.jpg'),
 } as const;
 
-function resolveAssetUri(module: number): string {
-  const resolved = Image.resolveAssetSource(module);
-  return resolved?.uri ?? '';
+async function resolveAssetUri(module: number): Promise<string> {
+  const asset = Asset.fromModule(module);
+  if (!asset.localUri && !asset.uri) {
+    await asset.downloadAsync();
+  } else if (!asset.downloaded) {
+    await asset.downloadAsync().catch(() => undefined);
+  }
+  return asset.localUri ?? asset.uri ?? '';
 }
 
 /** Deterministic pseudo-random generator so the demo data is reproducible. */
@@ -158,7 +163,7 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-function samplePhotoUri(week: number, kind: 'overview' | 'plant'): string {
+async function samplePhotoUri(week: number, kind: 'overview' | 'plant'): Promise<string> {
   if (week === 1) {
     return resolveAssetUri(
       kind === 'overview' ? SAMPLE_IMAGE_MODULES.w1Overview : SAMPLE_IMAGE_MODULES.w1Plant,
@@ -169,7 +174,7 @@ function samplePhotoUri(week: number, kind: 'overview' | 'plant'): string {
   );
 }
 
-function buildPhotos(experimentId: string, startDate: string): PhotoRecord[] {
+async function buildPhotos(experimentId: string, startDate: string): Promise<PhotoRecord[]> {
   const mondays = measurementDays(startDate).filter(
     (d) => d.weekday === 'Monday' && d.week <= 2,
   );
@@ -187,7 +192,7 @@ function buildPhotos(experimentId: string, startDate: string): PhotoRecord[] {
         kind: slot.kind,
         plantId: slot.plantId,
         storagePath: `experiments/${experimentId}/week-${m.week}/${m.date}_${fileLabel}.jpg`,
-        downloadUrl: samplePhotoUri(m.week, slot.kind),
+        downloadUrl: await samplePhotoUri(m.week, slot.kind),
         largestLeafAreaCm2:
           slot.kind === 'plant'
             ? round1(8 + m.week * 4 + (slot.plantId!.charCodeAt(1) % 5))
@@ -210,6 +215,6 @@ export async function loadSampleData(): Promise<Experiment> {
   await setSensorReadings(experiment.id, buildSensorReadings(experiment.startDate, rand));
   await setPhenotypeRecords(experiment.id, buildPhenotypeRecords(experiment.startDate, rand));
   await setLightingLogs(experiment.id, buildLightingLogs(experiment.startDate, rand));
-  await setPhotos(experiment.id, buildPhotos(experiment.id, experiment.startDate));
+  await setPhotos(experiment.id, await buildPhotos(experiment.id, experiment.startDate));
   return experiment;
 }

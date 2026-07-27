@@ -8,7 +8,6 @@ import { addPhenotypeRecord, phenotypeRecordsForDate } from '../lib/repo';
 import {
   MeasurementDay,
   TOTAL_MEASUREMENT_POINTS,
-  findScheduledDay,
   measurementDays,
   toISODate,
 } from '../lib/schedule';
@@ -20,12 +19,17 @@ function parseNum(v: string): number | null {
   return v.trim() === '' || Number.isNaN(n) ? null : n;
 }
 
+function fmtNum(v: number | null | undefined): string {
+  return v === null || v === undefined ? '' : String(v);
+}
+
 export default function PhenotypingScreen() {
   const { experiment } = useExperiment();
 
   const [selectedDay, setSelectedDay] = useState<MeasurementDay | null>(null);
   const [plantId, setPlantId] = useState<PlantId>('P1');
-  const [donePlants, setDonePlants] = useState<Set<string>>(new Set());
+  const [records, setRecords] = useState<PhenotypeRecord[]>([]);
+  const [daysWithData, setDaysWithData] = useState<Set<string>>(new Set());
 
   const [height, setHeight] = useState('');
   const [stemLength, setStemLength] = useState('');
@@ -37,33 +41,71 @@ export default function PhenotypingScreen() {
 
   useEffect(() => {
     if (!experiment) return;
-    const today = findScheduledDay(experiment.startDate);
-    if (today) {
-      setSelectedDay(today);
-    } else {
-      // Default to the nearest past (or first) scheduled day for late entry.
-      const days = measurementDays(experiment.startDate);
-      const iso = toISODate(new Date());
-      const past = [...days].reverse().find((d) => d.date <= iso);
-      setSelectedDay(past ?? days[0]);
-    }
+    const days = measurementDays(experiment.startDate);
+    const iso = toISODate(new Date());
+    // Prefer the latest sample week (1–2) day that already has data, else latest past day.
+    const sampleDays = days.filter((d) => d.week <= 2 && d.date <= iso);
+    setSelectedDay(sampleDays[sampleDays.length - 1] ?? days.find((d) => d.date <= iso) ?? days[0]);
   }, [experiment?.id]);
 
-  const refreshDone = useCallback(async () => {
+  const refreshDay = useCallback(async () => {
     if (!experiment || !selectedDay) return;
     try {
-      const records = await phenotypeRecordsForDate(experiment.id, selectedDay.date);
-      setDonePlants(new Set(records.map((r) => r.plantId)));
+      const list = await phenotypeRecordsForDate(experiment.id, selectedDay.date);
+      setRecords(list);
     } catch {
-      // non-fatal; progress indicator just stays empty
+      setRecords([]);
     }
   }, [experiment?.id, selectedDay?.date]);
 
+  // Scan weeks 1–2 (and any other past days) so day chips can show a ✓ when data exists.
+  const refreshDayMarkers = useCallback(async () => {
+    if (!experiment) return;
+    const days = measurementDays(experiment.startDate).filter((d) => d.week <= 2);
+    const marked = new Set<string>();
+    await Promise.all(
+      days.map(async (d) => {
+        try {
+          const list = await phenotypeRecordsForDate(experiment.id, d.date);
+          if (list.length > 0) marked.add(d.date);
+        } catch {
+          // ignore
+        }
+      }),
+    );
+    setDaysWithData(marked);
+  }, [experiment?.id]);
+
   useFocusEffect(
     useCallback(() => {
-      refreshDone();
-    }, [refreshDone]),
+      refreshDay();
+      refreshDayMarkers();
+    }, [refreshDay, refreshDayMarkers]),
   );
+
+  useEffect(() => {
+    refreshDay();
+  }, [refreshDay]);
+
+  // Prefill the form from the selected plant's existing record for this day.
+  useEffect(() => {
+    const existing = records.find((r) => r.plantId === plantId);
+    if (existing) {
+      setHeight(fmtNum(existing.plantHeightCm));
+      setStemLength(fmtNum(existing.stemLengthCm));
+      setLeafCount(fmtNum(existing.leafCount));
+      setLeafArea(fmtNum(existing.leafAreaCm2));
+      setShootCount(fmtNum(existing.shootCount));
+      setStatus({ text: `${plantId} already recorded — edit and save to update.`, error: false });
+    } else {
+      setHeight('');
+      setStemLength('');
+      setLeafCount('');
+      setLeafArea('');
+      setShootCount('');
+      setStatus(null);
+    }
+  }, [plantId, records]);
 
   if (!experiment) {
     return (
@@ -74,6 +116,7 @@ export default function PhenotypingScreen() {
   }
 
   const days = measurementDays(experiment.startDate);
+  const donePlants = new Set(records.map((r) => r.plantId));
 
   const onSave = async () => {
     if (!selectedDay) return;
@@ -103,11 +146,11 @@ export default function PhenotypingScreen() {
     setStatus(null);
     try {
       await addPhenotypeRecord(experiment.id, record);
-      setHeight(''); setStemLength(''); setLeafCount(''); setLeafArea(''); setShootCount('');
-      await refreshDone();
-      // Move to the next plant that has no record yet, to speed up field work.
-      const next = PLANT_IDS.find((p) => p !== plantId && !donePlants.has(p) && p > plantId)
-        ?? PLANT_IDS.find((p) => !donePlants.has(p) && p !== plantId);
+      await refreshDay();
+      await refreshDayMarkers();
+      const next =
+        PLANT_IDS.find((p) => p !== plantId && !donePlants.has(p) && p > plantId) ??
+        PLANT_IDS.find((p) => !donePlants.has(p) && p !== plantId);
       setStatus({ text: `${plantId} saved.`, error: false });
       if (next) setPlantId(next);
     } catch (e) {
@@ -123,18 +166,20 @@ export default function PhenotypingScreen() {
         <SectionTitle>Measurement day</SectionTitle>
         <Text style={styles.hint}>
           Mondays, Wednesdays and Fridays — {TOTAL_MEASUREMENT_POINTS} points over 6 weeks.
+          Sample data is filled for weeks 1–2 (days marked ✓).
         </Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
           <View style={styles.dayRow}>
             {days.map((d) => {
               const active = selectedDay?.date === d.date;
+              const hasData = daysWithData.has(d.date);
               return (
                 <Text
                   key={d.date}
-                  style={[styles.dayChip, active && styles.dayChipActive]}
+                  style={[styles.dayChip, active && styles.dayChipActive, hasData && !active && styles.dayChipDone]}
                   onPress={() => setSelectedDay(d)}
                 >
-                  {`#${d.measurementPoint} · W${d.week} ${d.weekday.slice(0, 3)}\n${d.date}`}
+                  {`#${d.measurementPoint} · W${d.week} ${d.weekday.slice(0, 3)}${hasData ? ' ✓' : ''}\n${d.date}`}
                 </Text>
               );
             })}
@@ -154,6 +199,7 @@ export default function PhenotypingScreen() {
         />
         <Text style={styles.progress}>
           {donePlants.size}/10 plants recorded for {selectedDay?.date ?? '—'}
+          {selectedDay && selectedDay.week <= 2 ? ' (sample week)' : ''}
         </Text>
       </Card>
 
@@ -222,6 +268,10 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
     color: '#fff',
     fontWeight: '700',
+  },
+  dayChipDone: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primaryLight,
   },
   progress: {
     marginTop: spacing.md,

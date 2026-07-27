@@ -14,6 +14,10 @@ function parseNum(v: string): number | null {
   return v.trim() === '' || Number.isNaN(n) ? null : n;
 }
 
+function fmtNum(v: number | null | undefined): string {
+  return v === null || v === undefined ? '' : String(v);
+}
+
 export default function LightingScreen() {
   const { experiment } = useExperiment();
 
@@ -34,16 +38,55 @@ export default function LightingScreen() {
     if (!experiment) return;
     const sessions = mondaySessions(experiment.startDate);
     const iso = toISODate(new Date());
-    const current = [...sessions].reverse().find((s) => s.date <= iso) ?? sessions[0];
-    setSession(current);
+    // Prefer the latest sample week (1–2) that has a date on or before today.
+    const sampleSessions = sessions.filter((s) => s.week <= 2 && s.date <= iso);
+    setSession(sampleSessions[sampleSessions.length - 1] ?? sessions.find((s) => s.date <= iso) ?? sessions[0]);
+  }, [experiment?.id]);
+
+  const refreshLogs = useCallback(async () => {
+    if (!experiment) return;
+    try {
+      setLogs(await listLightingLogs(experiment.id));
+    } catch {
+      setLogs([]);
+    }
   }, [experiment?.id]);
 
   useFocusEffect(
     useCallback(() => {
-      if (!experiment) return;
-      listLightingLogs(experiment.id).then(setLogs).catch(() => {});
-    }, [experiment?.id]),
+      refreshLogs();
+    }, [refreshLogs]),
   );
+
+  // Prefill the form when the selected week already has a lighting log.
+  useEffect(() => {
+    if (!session) return;
+    const existing = logs.find((l) => l.week === session.week);
+    if (existing) {
+      setLightType(existing.lightType ?? '');
+      setHours(fmtNum(existing.dailyLightHours));
+      setDistance(fmtNum(existing.lightPlantDistanceCm));
+      setLeft(fmtNum(existing.zoneLightLevels?.left));
+      setCenter(fmtNum(existing.zoneLightLevels?.center));
+      setRight(fmtNum(existing.zoneLightLevels?.right));
+      setIssue(existing.plantIssue ?? 'none');
+      setNotes(existing.notes ?? '');
+      setStatus({
+        text: `Week ${session.week} sample log loaded — edit and save to update.`,
+        error: false,
+      });
+    } else {
+      setLightType('');
+      setHours('');
+      setDistance('');
+      setLeft('');
+      setCenter('');
+      setRight('');
+      setIssue('none');
+      setNotes('');
+      setStatus(null);
+    }
+  }, [session?.week, logs]);
 
   if (!experiment) {
     return (
@@ -54,6 +97,7 @@ export default function LightingScreen() {
   }
 
   const sessions = mondaySessions(experiment.startDate);
+  const loggedWeeks = new Set(logs.map((l) => l.week));
 
   const onSave = async () => {
     if (!session) return;
@@ -80,7 +124,7 @@ export default function LightingScreen() {
     setStatus(null);
     try {
       await addLightingLog(experiment.id, log);
-      setLogs([log, ...logs]);
+      await refreshLogs();
       setStatus({ text: `Week ${session.week} lighting log saved.`, error: false });
     } catch (e) {
       setStatus({ text: e instanceof Error ? e.message : String(e), error: true });
@@ -89,12 +133,13 @@ export default function LightingScreen() {
     }
   };
 
-  const loggedWeeks = new Set(logs.map((l) => l.week));
-
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Card>
         <SectionTitle>Weekly session (Mondays)</SectionTitle>
+        <Text style={styles.intro}>
+          Sample lighting logs are filled for weeks 1–2 (marked ✓). Select a week to view or edit.
+        </Text>
         <ChipRow
           options={sessions.map((s) => String(s.week)) as readonly string[]}
           labels={Object.fromEntries(
@@ -108,6 +153,7 @@ export default function LightingScreen() {
         />
         <Text style={styles.hint}>
           {session ? `Session date: ${session.date}` : ''}
+          {session && loggedWeeks.has(session.week) ? ' · log on file' : ''}
         </Text>
       </Card>
 
@@ -186,6 +232,12 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 15,
     textAlign: 'center',
+  },
+  intro: {
+    fontSize: 13,
+    color: colors.textMuted,
+    marginBottom: spacing.md,
+    lineHeight: 18,
   },
   hint: {
     fontSize: 13,

@@ -31,6 +31,9 @@
     "web": {
       "favicon": "./assets/hai-logo.png"
     },
+    "experiments": {
+      "baseUrl": "/hmon-app"
+    },
     "plugins": [
       [
         "expo-image-picker",

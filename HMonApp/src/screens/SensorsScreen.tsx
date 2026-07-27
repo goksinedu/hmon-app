@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
-import { Alert, FlatList, StyleSheet, Switch, Text, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import React, { useCallback, useState } from 'react';
+import { FlatList, StyleSheet, Switch, Text, View } from 'react-native';
 
 import { Button, Card, NumberField, SectionTitle } from '../components/UI';
 import { useExperiment } from '../context/ExperimentContext';
-import { firebaseReady } from '../lib/firebase';
 import { addSensorReading, watchSensorReadings } from '../lib/repo';
 import { SensorReading } from '../lib/types';
 import { colors, spacing } from '../theme';
@@ -40,6 +40,7 @@ export default function SensorsScreen() {
   const { experiment } = useExperiment();
   const [readings, setReadings] = useState<SensorReading[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const [ph, setPh] = useState('');
   const [ec, setEc] = useState('');
@@ -49,20 +50,23 @@ export default function SensorsScreen() {
   const [humidity, setHumidity] = useState('');
   const [waterLevelOk, setWaterLevelOk] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState<{ text: string; error: boolean } | null>(null);
 
-  useEffect(() => {
-    if (!experiment || !firebaseReady()) return;
-    const unsub = watchSensorReadings(
-      experiment.id,
-      50,
-      (r) => {
-        setError(null);
-        setReadings(r);
-      },
-      (e) => setError(e.message),
-    );
-    return unsub;
-  }, [experiment?.id]);
+  useFocusEffect(
+    useCallback(() => {
+      if (!experiment) return;
+      const unsub = watchSensorReadings(
+        experiment.id,
+        50,
+        (r) => {
+          setError(null);
+          setReadings(r);
+        },
+        (e) => setError(e.message),
+      );
+      return unsub;
+    }, [experiment?.id, refreshKey]),
+  );
 
   if (!experiment) {
     return (
@@ -73,10 +77,6 @@ export default function SensorsScreen() {
   }
 
   const onSave = async () => {
-    if (!firebaseReady()) {
-      Alert.alert('Cloud not configured', 'Configure Firebase (see README) before saving readings.');
-      return;
-    }
     const reading: SensorReading = {
       timestamp: Date.now(),
       ph: parseNum(ph),
@@ -96,16 +96,18 @@ export default function SensorsScreen() {
       reading.ambientTempC === null &&
       reading.ambientHumidityPct === null
     ) {
-      Alert.alert('Nothing to save', 'Enter at least one sensor value.');
+      setStatus({ text: 'Enter at least one sensor value.', error: true });
       return;
     }
     setSaving(true);
+    setStatus(null);
     try {
       await addSensorReading(experiment.id, reading);
       setPh(''); setEc(''); setTds(''); setWaterTemp(''); setAirTemp(''); setHumidity('');
-      Alert.alert('Saved', 'Reading stored in the cloud database.');
+      setStatus({ text: 'Reading saved.', error: false });
+      setRefreshKey((k) => k + 1);
     } catch (e) {
-      Alert.alert('Cloud error', e instanceof Error ? e.message : String(e));
+      setStatus({ text: e instanceof Error ? e.message : String(e), error: true });
     } finally {
       setSaving(false);
     }
@@ -154,15 +156,16 @@ export default function SensorsScreen() {
                 trackColor={{ true: colors.primary, false: colors.danger }}
               />
             </View>
-            <Button title="Save reading to cloud" onPress={onSave} loading={saving} />
+            <Button title="Save reading" onPress={onSave} loading={saving} />
+            {status && (
+              <Text style={[styles.status, status.error ? styles.statusError : styles.statusOk]}>
+                {status.text}
+              </Text>
+            )}
           </Card>
           <SectionTitle>Recent readings</SectionTitle>
           {error ? <Text style={{ color: colors.danger }}>{error}</Text> : null}
-          {!firebaseReady() ? (
-            <Text style={styles.hint}>Connect Firebase to see live IoT data here.</Text>
-          ) : readings.length === 0 ? (
-            <Text style={styles.hint}>No readings yet.</Text>
-          ) : null}
+          {readings.length === 0 ? <Text style={styles.hint}>No readings yet.</Text> : null}
         </>
       }
     />
@@ -214,6 +217,18 @@ const styles = StyleSheet.create({
   switchLabel: {
     fontSize: 15,
     color: colors.text,
+    fontWeight: '600',
+  },
+  status: {
+    marginTop: spacing.md,
+    fontSize: 13,
+  },
+  statusOk: {
+    color: colors.primaryDark,
+    fontWeight: '600',
+  },
+  statusError: {
+    color: colors.danger,
     fontWeight: '600',
   },
   row: {

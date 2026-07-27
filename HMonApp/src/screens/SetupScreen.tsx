@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { Button, Card, ChipRow, SectionTitle, TextField } from '../components/UI';
 import { useExperiment } from '../context/ExperimentContext';
 import { firebaseReady } from '../lib/firebase';
 import { saveExperiment } from '../lib/repo';
+import { loadSampleData } from '../lib/sampleData';
 import { toISODate } from '../lib/schedule';
 import { CULTIVARS, Experiment } from '../lib/types';
 import { colors, spacing } from '../theme';
@@ -27,15 +28,30 @@ export default function SetupScreen() {
   const [customCultivar, setCustomCultivar] = useState('');
   const [startDate, setStartDate] = useState(experiment?.startDate ?? toISODate(new Date()));
   const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState<{ text: string; error: boolean } | null>(null);
+
+  const [seeding, setSeeding] = useState(false);
+  const [seedStatus, setSeedStatus] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!experiment) return;
+    setName(experiment.name);
+    setSchool(experiment.school);
+    setCountry(experiment.country);
+    setSystemId(experiment.systemId);
+    setCultivar(experiment.cultivar);
+    setCustomCultivar('');
+    setStartDate(experiment.startDate);
+  }, [experiment?.id]);
 
   const onSave = async () => {
     const chosenCultivar = customCultivar.trim() || cultivar;
     if (!name.trim() || !school.trim() || !country.trim() || !systemId.trim() || !chosenCultivar) {
-      Alert.alert('Missing information', 'Please fill in every field, including the cultivar.');
+      setStatus({ text: 'Please fill in every field, including the cultivar.', error: true });
       return;
     }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate.trim())) {
-      Alert.alert('Invalid date', 'Start date must use the format YYYY-MM-DD.');
+      setStatus({ text: 'Start date must use the format YYYY-MM-DD.', error: true });
       return;
     }
     const exp: Experiment = {
@@ -49,21 +65,36 @@ export default function SetupScreen() {
       createdAt: experiment?.createdAt ?? Date.now(),
     };
     setSaving(true);
+    setStatus(null);
     try {
-      if (firebaseReady()) {
-        await saveExperiment(exp);
-      }
+      await saveExperiment(exp);
       await setExperiment(exp);
-      Alert.alert(
-        'Experiment saved',
-        firebaseReady()
-          ? 'Metadata stored in the cloud database.'
-          : 'Saved locally. Configure Firebase (see README) to sync with the common cloud database.',
-      );
+      setStatus({
+        text: firebaseReady()
+          ? 'Experiment saved to the cloud database.'
+          : 'Experiment saved on this device. Configure Firebase (see README) to sync with the shared cloud database.',
+        error: false,
+      });
     } catch (e) {
-      Alert.alert('Cloud error', e instanceof Error ? e.message : String(e));
+      setStatus({ text: e instanceof Error ? e.message : String(e), error: true });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const onLoadSample = async () => {
+    setSeeding(true);
+    setSeedStatus(null);
+    try {
+      const exp = await loadSampleData();
+      await setExperiment(exp);
+      setSeedStatus(
+        'Sample dataset loaded: 2 weeks of IoT sensor readings, P1–P10 phenotyping (6 measurement points) and 2 lighting logs. Explore it from the Dashboard.',
+      );
+    } catch (e) {
+      setSeedStatus(`Failed to load sample data: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSeeding(false);
     }
   };
 
@@ -72,7 +103,7 @@ export default function SetupScreen() {
       {!firebaseReady() && (
         <View style={styles.banner}>
           <Text style={styles.bannerText}>
-            Firebase is not configured yet — data will only be kept on this device. Follow the
+            Firebase is not configured yet — data is kept on this device (demo mode). Follow the
             README to connect the app to the shared cloud database.
           </Text>
         </View>
@@ -105,6 +136,27 @@ export default function SetupScreen() {
       </Card>
 
       <Button title={experiment ? 'Update experiment' : 'Create experiment'} onPress={onSave} loading={saving} />
+      {status && (
+        <Text style={[styles.status, status.error ? styles.statusError : styles.statusOk]}>
+          {status.text}
+        </Text>
+      )}
+
+      <Card style={{ marginTop: spacing.xl }}>
+        <SectionTitle>Demo / training mode</SectionTitle>
+        <Text style={styles.demoText}>
+          Loads a ready-made experiment with two weeks of realistic data: IoT sensor readings
+          every 3 hours, phenotyping for plants P1–P10 on all 6 Mon/Wed/Fri measurement points,
+          both weekly lighting logs, and 22 placeholder photos (11 per Monday session).
+        </Text>
+        <Button
+          title="Load 2-week sample dataset"
+          onPress={onLoadSample}
+          loading={seeding}
+          variant="secondary"
+        />
+        {seedStatus && <Text style={[styles.status, styles.statusOk]}>{seedStatus}</Text>}
+      </Card>
     </ScrollView>
   );
 }
@@ -129,5 +181,24 @@ const styles = StyleSheet.create({
   bannerText: {
     color: '#8a5a00',
     fontSize: 13,
+  },
+  status: {
+    marginTop: spacing.md,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  statusOk: {
+    color: colors.primaryDark,
+    fontWeight: '600',
+  },
+  statusError: {
+    color: colors.danger,
+    fontWeight: '600',
+  },
+  demoText: {
+    fontSize: 13,
+    color: colors.textMuted,
+    lineHeight: 19,
+    marginBottom: spacing.md,
   },
 });

@@ -1,9 +1,9 @@
+import { useFocusEffect } from '@react-navigation/native';
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { Button, Card, ChipRow, NumberField, SectionTitle } from '../components/UI';
 import { useExperiment } from '../context/ExperimentContext';
-import { firebaseReady } from '../lib/firebase';
 import { addPhenotypeRecord, phenotypeRecordsForDate } from '../lib/repo';
 import {
   MeasurementDay,
@@ -33,6 +33,7 @@ export default function PhenotypingScreen() {
   const [leafArea, setLeafArea] = useState('');
   const [shootCount, setShootCount] = useState('');
   const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState<{ text: string; error: boolean } | null>(null);
 
   useEffect(() => {
     if (!experiment) return;
@@ -49,7 +50,7 @@ export default function PhenotypingScreen() {
   }, [experiment?.id]);
 
   const refreshDone = useCallback(async () => {
-    if (!experiment || !selectedDay || !firebaseReady()) return;
+    if (!experiment || !selectedDay) return;
     try {
       const records = await phenotypeRecordsForDate(experiment.id, selectedDay.date);
       setDonePlants(new Set(records.map((r) => r.plantId)));
@@ -58,9 +59,11 @@ export default function PhenotypingScreen() {
     }
   }, [experiment?.id, selectedDay?.date]);
 
-  useEffect(() => {
-    refreshDone();
-  }, [refreshDone]);
+  useFocusEffect(
+    useCallback(() => {
+      refreshDone();
+    }, [refreshDone]),
+  );
 
   if (!experiment) {
     return (
@@ -74,10 +77,6 @@ export default function PhenotypingScreen() {
 
   const onSave = async () => {
     if (!selectedDay) return;
-    if (!firebaseReady()) {
-      Alert.alert('Cloud not configured', 'Configure Firebase (see README) before saving.');
-      return;
-    }
     const record: PhenotypeRecord = {
       date: selectedDay.date,
       week: selectedDay.week,
@@ -97,10 +96,11 @@ export default function PhenotypingScreen() {
       record.leafAreaCm2 === null &&
       record.shootCount === null
     ) {
-      Alert.alert('Nothing to save', 'Enter at least one measurement.');
+      setStatus({ text: 'Enter at least one measurement.', error: true });
       return;
     }
     setSaving(true);
+    setStatus(null);
     try {
       await addPhenotypeRecord(experiment.id, record);
       setHeight(''); setStemLength(''); setLeafCount(''); setLeafArea(''); setShootCount('');
@@ -108,10 +108,10 @@ export default function PhenotypingScreen() {
       // Move to the next plant that has no record yet, to speed up field work.
       const next = PLANT_IDS.find((p) => p !== plantId && !donePlants.has(p) && p > plantId)
         ?? PLANT_IDS.find((p) => !donePlants.has(p) && p !== plantId);
+      setStatus({ text: `${plantId} saved.`, error: false });
       if (next) setPlantId(next);
-      Alert.alert('Saved', `${plantId} stored in the cloud database.`);
     } catch (e) {
-      Alert.alert('Cloud error', e instanceof Error ? e.message : String(e));
+      setStatus({ text: e instanceof Error ? e.message : String(e), error: true });
     } finally {
       setSaving(false);
     }
@@ -164,7 +164,12 @@ export default function PhenotypingScreen() {
         <NumberField label="Leaf number" value={leafCount} onChangeText={setLeafCount} unit="count" />
         <NumberField label="Leaf area" value={leafArea} onChangeText={setLeafArea} unit="cm²" />
         <NumberField label="Shoot number" value={shootCount} onChangeText={setShootCount} unit="count" />
-        <Button title={`Save ${plantId} to cloud`} onPress={onSave} loading={saving} />
+        <Button title={`Save ${plantId}`} onPress={onSave} loading={saving} />
+        {status && (
+          <Text style={[styles.status, status.error ? styles.statusError : styles.statusOk]}>
+            {status.text}
+          </Text>
+        )}
       </Card>
     </ScrollView>
   );
@@ -222,6 +227,18 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     fontSize: 13,
     color: colors.primaryDark,
+    fontWeight: '600',
+  },
+  status: {
+    marginTop: spacing.md,
+    fontSize: 13,
+  },
+  statusOk: {
+    color: colors.primaryDark,
+    fontWeight: '600',
+  },
+  statusError: {
+    color: colors.danger,
     fontWeight: '600',
   },
 });

@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { Button, Card, ChipRow, NumberField, SectionTitle, TextField } from '../components/UI';
 import { useExperiment } from '../context/ExperimentContext';
-import { firebaseReady } from '../lib/firebase';
 import { addLightingLog, listLightingLogs } from '../lib/repo';
 import { mondaySessions, toISODate } from '../lib/schedule';
 import { LightingLog, PLANT_ISSUES, PLANT_ISSUE_LABELS, PlantIssue } from '../lib/types';
@@ -27,6 +27,7 @@ export default function LightingScreen() {
   const [issue, setIssue] = useState<PlantIssue>('none');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState<{ text: string; error: boolean } | null>(null);
   const [logs, setLogs] = useState<LightingLog[]>([]);
 
   useEffect(() => {
@@ -35,10 +36,14 @@ export default function LightingScreen() {
     const iso = toISODate(new Date());
     const current = [...sessions].reverse().find((s) => s.date <= iso) ?? sessions[0];
     setSession(current);
-    if (firebaseReady()) {
-      listLightingLogs(experiment.id).then(setLogs).catch(() => {});
-    }
   }, [experiment?.id]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!experiment) return;
+      listLightingLogs(experiment.id).then(setLogs).catch(() => {});
+    }, [experiment?.id]),
+  );
 
   if (!experiment) {
     return (
@@ -52,12 +57,8 @@ export default function LightingScreen() {
 
   const onSave = async () => {
     if (!session) return;
-    if (!firebaseReady()) {
-      Alert.alert('Cloud not configured', 'Configure Firebase (see README) before saving.');
-      return;
-    }
     if (!lightType.trim()) {
-      Alert.alert('Missing information', 'Please enter the light type.');
+      setStatus({ text: 'Please enter the light type.', error: true });
       return;
     }
     const log: LightingLog = {
@@ -76,12 +77,13 @@ export default function LightingScreen() {
       createdAt: Date.now(),
     };
     setSaving(true);
+    setStatus(null);
     try {
       await addLightingLog(experiment.id, log);
       setLogs([log, ...logs]);
-      Alert.alert('Saved', `Week ${session.week} lighting log stored in the cloud database.`);
+      setStatus({ text: `Week ${session.week} lighting log saved.`, error: false });
     } catch (e) {
-      Alert.alert('Cloud error', e instanceof Error ? e.message : String(e));
+      setStatus({ text: e instanceof Error ? e.message : String(e), error: true });
     } finally {
       setSaving(false);
     }
@@ -154,7 +156,12 @@ export default function LightingScreen() {
         />
       </Card>
 
-      <Button title="Save lighting log to cloud" onPress={onSave} loading={saving} />
+      <Button title="Save lighting log" onPress={onSave} loading={saving} />
+      {status && (
+        <Text style={[styles.status, status.error ? styles.statusError : styles.statusOk]}>
+          {status.text}
+        </Text>
+      )}
     </ScrollView>
   );
 }
@@ -191,5 +198,18 @@ const styles = StyleSheet.create({
   },
   zoneItem: {
     flex: 1,
+  },
+  status: {
+    marginTop: spacing.md,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  statusOk: {
+    color: colors.primaryDark,
+    fontWeight: '600',
+  },
+  statusError: {
+    color: colors.danger,
+    fontWeight: '600',
   },
 });

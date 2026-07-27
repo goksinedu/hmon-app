@@ -8,9 +8,12 @@ import React, {
   useState,
 } from 'react';
 
+import { loadSampleData } from '../lib/sampleData';
 import { Experiment } from '../lib/types';
 
 const STORAGE_KEY = 'hmon.activeExperiment';
+/** Bump to force-reseeding the 2-week demo dataset for existing visitors. */
+const SAMPLE_SEED_KEY = 'hmon.sampleSeeded.v2';
 
 interface ExperimentContextValue {
   experiment: Experiment | null;
@@ -29,11 +32,23 @@ export function ExperimentProvider({ children }: { children: React.ReactNode }) 
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    AsyncStorage.getItem(STORAGE_KEY)
-      .then((raw) => {
+    (async () => {
+      try {
+        const seeded = await AsyncStorage.getItem(SAMPLE_SEED_KEY);
+        if (!seeded) {
+          // First visit (or seed version bump): populate a ready-made 2-week demo.
+          const exp = await loadSampleData();
+          setExperimentState(exp);
+          await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(exp));
+          await AsyncStorage.setItem(SAMPLE_SEED_KEY, '1');
+          return;
+        }
+        const raw = await AsyncStorage.getItem(STORAGE_KEY);
         if (raw) setExperimentState(JSON.parse(raw));
-      })
-      .finally(() => setLoading(false));
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, []);
 
   const setExperiment = useCallback(async (exp: Experiment | null) => {

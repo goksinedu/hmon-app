@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import React, { useCallback, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { Card, SectionTitle } from '../components/UI';
 import { useExperiment } from '../context/ExperimentContext';
-import { firebaseReady } from '../lib/firebase';
 import { watchSensorReadings } from '../lib/repo';
 import {
   EXPERIMENT_DAYS,
@@ -37,19 +37,21 @@ export default function DashboardScreen() {
   const [latest, setLatest] = useState<SensorReading | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!experiment || !firebaseReady()) return;
-    const unsub = watchSensorReadings(
-      experiment.id,
-      1,
-      (readings) => {
-        setError(null);
-        setLatest(readings[0] ?? null);
-      },
-      (e) => setError(e.message),
-    );
-    return unsub;
-  }, [experiment?.id]);
+  useFocusEffect(
+    useCallback(() => {
+      if (!experiment) return;
+      const unsub = watchSensorReadings(
+        experiment.id,
+        1,
+        (readings) => {
+          setError(null);
+          setLatest(readings[0] ?? null);
+        },
+        (e) => setError(e.message),
+      );
+      return unsub;
+    }, [experiment?.id]),
+  );
 
   if (!experiment) {
     return (
@@ -113,11 +115,7 @@ export default function DashboardScreen() {
 
       <Card>
         <SectionTitle>Latest sensor readings</SectionTitle>
-        {!firebaseReady() ? (
-          <Text style={styles.metaLine}>
-            Connect Firebase (see README) to receive live IoT sensor data.
-          </Text>
-        ) : error ? (
+        {error ? (
           <Text style={[styles.metaLine, { color: colors.danger }]}>{error}</Text>
         ) : !latest ? (
           <Text style={styles.metaLine}>No sensor data yet.</Text>

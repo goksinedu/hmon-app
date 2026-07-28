@@ -173,6 +173,30 @@ export async function phenotypeRecordsForDate(
   return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<PhenotypeRecord, 'id'>) }));
 }
 
+export async function listPhenotypeRecords(experimentId: string): Promise<PhenotypeRecord[]> {
+  if (!firebaseReady()) {
+    return local.readAll<PhenotypeRecord>(experimentId, 'phenotype');
+  }
+  await ensureSignedIn();
+  const snap = await getDocs(collection(getDb(), 'experiments', experimentId, 'phenotype'));
+  return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<PhenotypeRecord, 'id'>) }));
+}
+
+export async function listAllSensorReadings(experimentId: string): Promise<SensorReading[]> {
+  if (!firebaseReady()) {
+    const all = await local.readAll<SensorReading>(experimentId, 'sensorReadings');
+    return all.sort((a, b) => a.timestamp - b.timestamp);
+  }
+  await ensureSignedIn();
+  const snap = await getDocs(
+    query(
+      collection(getDb(), 'experiments', experimentId, 'sensorReadings'),
+      orderBy('timestamp', 'asc'),
+    ),
+  );
+  return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<SensorReading, 'id'>) }));
+}
+
 // --------------------------------------------------------------- lighting log
 
 export async function addLightingLog(

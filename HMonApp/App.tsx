@@ -12,6 +12,7 @@ import DashboardScreen from './src/screens/DashboardScreen';
 import LightingScreen from './src/screens/LightingScreen';
 import PhenotypingScreen from './src/screens/PhenotypingScreen';
 import PhotosScreen from './src/screens/PhotosScreen';
+import ResultsScreen from './src/screens/ResultsScreen';
 import SensorsScreen from './src/screens/SensorsScreen';
 import SetupScreen from './src/screens/SetupScreen';
 import { colors } from './src/theme';
@@ -20,13 +21,12 @@ const Tab = createBottomTabNavigator();
 
 function TabIcon({ glyph, focused }: { glyph: string; focused: boolean }) {
   return (
-    <Text style={{ fontSize: 18, opacity: focused ? 1 : 0.45 }}>{glyph}</Text>
+    <Text style={{ fontSize: 16, opacity: focused ? 1 : 0.45 }}>{glyph}</Text>
   );
 }
 
 export default function App() {
   useEffect(() => {
-    // Anonymous cloud sign-in (no-op until Firebase is configured).
     ensureSignedIn().catch(() => {});
   }, []);
 
@@ -42,14 +42,17 @@ export default function App() {
                 headerShown: false,
                 tabBarActiveTintColor: colors.primaryDark,
                 tabBarInactiveTintColor: colors.textMuted,
-                tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
-                tabBarStyle: { borderTopColor: colors.border },
+                tabBarLabelStyle: { fontSize: 9, fontWeight: '600' },
+                tabBarStyle: { borderTopColor: colors.border, height: 58, paddingBottom: 4 },
               }}
             >
               <Tab.Screen
                 name="Dashboard"
                 component={DashboardScreen}
-                options={{ tabBarIcon: (p) => <TabIcon glyph="🏠" focused={p.focused} /> }}
+                options={{
+                  tabBarLabel: 'Home',
+                  tabBarIcon: (p) => <TabIcon glyph="🏠" focused={p.focused} />,
+                }}
               />
               <Tab.Screen
                 name="Sensors"
@@ -64,12 +67,23 @@ export default function App() {
               <Tab.Screen
                 name="Lighting"
                 component={LightingScreen}
-                options={{ tabBarIcon: (p) => <TabIcon glyph="💡" focused={p.focused} /> }}
+                options={{
+                  tabBarLabel: 'Light',
+                  tabBarIcon: (p) => <TabIcon glyph="💡" focused={p.focused} />,
+                }}
               />
               <Tab.Screen
                 name="Photos"
                 component={PhotosScreen}
                 options={{ tabBarIcon: (p) => <TabIcon glyph="📷" focused={p.focused} /> }}
+              />
+              <Tab.Screen
+                name="Results"
+                component={ResultsScreen}
+                options={{
+                  tabBarLabel: 'Results',
+                  tabBarIcon: (p) => <TabIcon glyph="📊" focused={p.focused} />,
+                }}
               />
               <Tab.Screen
                 name="Setup"

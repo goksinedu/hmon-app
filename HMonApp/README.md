@@ -35,6 +35,21 @@ npx expo start
 
 Scan the QR code with the **Expo Go** app (Android/iOS) or press `w` for web.
 
+### Publish to Google Play & App Store
+
+The project is configured for **EAS Build** (Android + iPhone). Follow the step-by-step guide:
+
+**→ [PUBLISHING.md](PUBLISHING.md)** — accounts, `eas build`, Play Console, App Store Connect, privacy policy, checklists.
+
+Quick start after creating an Expo account:
+
+```bash
+npm install -g eas-cli
+eas login
+eas init
+eas build --platform all --profile production
+```
+
 ## Connecting the cloud (required for data storage)
 
 1. Create a project at [console.firebase.google.com](https://console.firebase.google.com).

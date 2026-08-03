@@ -1,0 +1,14 @@
+# Keep local builds and secrets out of EAS uploads
+node_modules/
+.expo/
+dist/
+web-build/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+.env
+.env.*
+google-services.json
+GoogleService-Info.plist
